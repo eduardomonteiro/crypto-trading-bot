@@ -1,36 +1,105 @@
----
+# docker-compose.yml — crypto-trading-bot
+# Inclui: Freqtrade + PostgreSQL (config store)
+# Use .env para todas as variaveis sensiveis (copie de .env.example)
+
 services:
+
+  # ============================================================
+  # PostgreSQL — Config Store do Bot
+  # Armazena configuracoes dinamicas, historico de trades e
+  # validacoes de IA. Substitui valores estaticos do config.json
+  # ============================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: freqtrade-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-freqtrade_config}
+      POSTGRES_USER: ${POSTGRES_USER:-freqtrade}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Auto-executa schema + seed na primeira inicializacao:
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./database/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+    ports:
+      # Acesso local apenas — nao expor para internet
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-freqtrade} -d ${POSTGRES_DB:-freqtrade_config}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  # ============================================================
+  # Freqtrade — Trading Bot
+  # ============================================================
   freqtrade:
     image: freqtradeorg/freqtrade:stable
-    # image: freqtradeorg/freqtrade:develop
-    # Use plotting image
-    # image: freqtradeorg/freqtrade:develop_plot
-    # # Enable GPU Image and GPU Resources (only relevant for freqAI)
-    # # Make sure to uncomment the whole deploy section
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
-    # Build step - only needed when additional dependencies are needed
-    # build:
-    #   context: .
-    #   dockerfile: "./docker/Dockerfile.custom"
-    restart: unless-stopped
     container_name: freqtrade
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       - "./user_data:/freqtrade/user_data"
-    # Expose api on port 8080 (localhost only)
-    # Please read the https://www.freqtrade.io/en/stable/rest-api/ documentation
-    # for more information.
+      - "./database:/freqtrade/database:ro"
     ports:
       - "127.0.0.1:8080:8080"
-    # Default command used when running `docker compose up`
+    # Variaveis de ambiente — NUNCA hardcode no config.json
+    environment:
+      # PostgreSQL (config store)
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-freqtrade}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-freqtrade_config}"
+      # PostgreSQL separado para trades (pode ser o mesmo banco)
+      DATABASE_URL_TRADES: "postgresql://${POSTGRES_USER:-freqtrade}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-freqtrade_config}"
+      # Exchange — injetados via env, nunca no config.json
+      FREQTRADE__EXCHANGE__NAME: ${EXCHANGE_NAME:-binance}
+      FREQTRADE__EXCHANGE__KEY: ${EXCHANGE_API_KEY:?EXCHANGE_API_KEY must be set in .env}
+      FREQTRADE__EXCHANGE__SECRET: ${EXCHANGE_API_SECRET:?EXCHANGE_API_SECRET must be set in .env}
+      # Telegram
+      FREQTRADE__TELEGRAM__ENABLED: ${TELEGRAM_ENABLED:-false}
+      FREQTRADE__TELEGRAM__TOKEN: ${TELEGRAM_TOKEN:-}
+      FREQTRADE__TELEGRAM__CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      # API Server
+      FREQTRADE__API_SERVER__JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set in .env}
+      FREQTRADE__API_SERVER__PASSWORD: ${API_SERVER_PASSWORD:?API_SERVER_PASSWORD must be set in .env}
+      FREQTRADE__API_SERVER__WS_TOKEN: ${API_WS_TOKEN:-}
+      # AI Validation (opcional)
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+    env_file:
+      - .env
     command: >
       trade
       --logfile /freqtrade/user_data/logs/freqtrade.log
-      --db-url sqlite:////freqtrade/user_data/tradesv3.sqlite
+      --db-url postgresql://${POSTGRES_USER:-freqtrade}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-freqtrade_config}
       --config /freqtrade/user_data/config.json
-      --strategy SampleStrategy
+      --strategy ${STRATEGY_NAME:-SampleStrategy}
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/api/v1/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "2.0"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  postgres_data:
+    driver: local

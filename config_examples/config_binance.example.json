@@ -1,16 +1,29 @@
 {
     "$schema": "https://schema.freqtrade.io/schema.json",
+    "_comment": "NUNCA coloque API keys neste arquivo. Use variaveis de ambiente via docker-compose.yml + .env",
     "max_open_trades": 3,
     "stake_currency": "USDT",
-    "stake_amount": 30,
-    "tradable_balance_ratio": 0.99,
+    "stake_amount": "unlimited",
+    "tradable_balance_ratio": 0.90,
     "fiat_display_currency": "USD",
-    "timeframe": "5m",
+    "timeframe": "1h",
     "dry_run": true,
-    "cancel_open_orders_on_exit": false,
+    "dry_run_wallet": 3000,
+    "cancel_open_orders_on_exit": true,
+    "stoploss": -0.05,
+    "trailing_stop": true,
+    "trailing_stop_positive": 0.015,
+    "trailing_stop_positive_offset": 0.030,
+    "trailing_only_offset_is_reached": true,
+    "minimal_roi": {
+        "120": 0.0,
+        "60": 0.01,
+        "30": 0.02,
+        "0": 0.04
+    },
     "unfilledtimeout": {
-        "entry": 10,
-        "exit": 10,
+        "entry": 5,
+        "exit": 15,
         "exit_timeout_count": 0,
         "unit": "minutes"
     },
@@ -20,7 +33,7 @@
         "order_book_top": 1,
         "price_last_balance": 0.0,
         "check_depth_of_market": {
-            "enabled": false,
+            "enabled": true,
             "bids_to_ask_delta": 1
         }
     },
@@ -31,54 +44,70 @@
     },
     "exchange": {
         "name": "binance",
-        "key": "your_exchange_key",
-        "secret": "your_exchange_secret",
-        "ccxt_config": {},
+        "key": "",
+        "secret": "",
+        "_comment_keys": "Chaves injetadas automaticamente via FREQTRADE__EXCHANGE__KEY e FREQTRADE__EXCHANGE__SECRET no docker-compose.yml",
+        "ccxt_config": {
+            "enableRateLimit": true
+        },
         "ccxt_async_config": {
+            "enableRateLimit": true
         },
         "pair_whitelist": [
-            "ALGO/USDT",
-            "ATOM/USDT",
-            "BAT/USDT",
-            "BCH/USDT",
-            "BRD/USDT",
-            "EOS/USDT",
+            "BTC/USDT",
             "ETH/USDT",
-            "IOTA/USDT",
-            "LINK/USDT",
-            "LTC/USDT",
-            "NEO/USDT",
-            "NXS/USDT",
-            "XMR/USDT",
-            "XRP/USDT",
-            "XTZ/USDT"
+            "BNB/USDT",
+            "SOL/USDT",
+            "ADA/USDT"
         ],
         "pair_blacklist": [
-            "BNB/.*"
+            "BNB/.*",
+            ".*DOWN/.*",
+            ".*UP/.*",
+            ".*BEAR/.*",
+            ".*BULL/.*"
         ]
     },
     "pairlists": [
-        {"method": "StaticPairList"}
+        {
+            "method": "VolumePairList",
+            "number_assets": 20,
+            "sort_key": "quoteVolume",
+            "min_value": 0,
+            "refresh_period": 1800
+        },
+        {"method": "AgeFilter", "min_days_listed": 10},
+        {"method": "PrecisionFilter"},
+        {"method": "PriceFilter", "low_price_ratio": 0.01},
+        {"method": "SpreadFilter", "max_spread_ratio": 0.005},
+        {"method": "RangeStabilityFilter", "lookback_days": 3, "min_rate_of_change": 0.06, "refresh_period": 1440},
+        {"method": "FullTradesFilter"}
     ],
     "telegram": {
         "enabled": false,
-        "token": "your_telegram_token",
-        "chat_id": "your_telegram_chat_id"
+        "token": "",
+        "chat_id": "",
+        "_comment": "Token e chat_id injetados via FREQTRADE__TELEGRAM__TOKEN e FREQTRADE__TELEGRAM__CHAT_ID"
     },
     "api_server": {
-        "enabled": false,
+        "enabled": true,
         "listen_ip_address": "127.0.0.1",
         "listen_port": 8080,
         "verbosity": "error",
-        "jwt_secret_key": "somethingRandomSomethingRandom123",
-        "CORS_origins": [],
+        "enable_openapi": true,
+        "jwt_secret_key": "",
+        "_comment_jwt": "Injetado via FREQTRADE__API_SERVER__JWT_SECRET_KEY. Gere: python -c 'import secrets; print(secrets.token_hex(32))'",
+        "CORS_origins": ["http://localhost:3000"],
         "username": "freqtrader",
-        "password": "SuperSecurePassword"
+        "password": ""
     },
-    "bot_name": "freqtrade",
+    "bot_name": "crypto-bot-binance",
     "initial_state": "running",
     "force_entry_enable": false,
     "internals": {
-        "process_throttle_secs": 5
-    }
+        "process_throttle_secs": 5,
+        "heartbeat_interval": 60
+    },
+    "dataformat_ohlcv": "feather",
+    "dataformat_trades": "feather"
 }
